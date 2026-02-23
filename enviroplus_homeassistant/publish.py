@@ -23,15 +23,14 @@ class MqttPublisher:
         self.on_connect = on_connect
 
         self.connection_error = None
-        self.client = mqtt.Client(client_id=client_id)
+        self.client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
         self.client.on_connect = self.__on_connect
         self.client.username_pw_set(username, password)
         logger = logging.getLogger(__name__)
         self.client.enable_logger(logger)
         if use_tls:
-            self.client.tls_set()
-        self.client.connect(host, port)
-        self.client.loop_start()
+            self.client.connect(host, port)
+            self.client.loop_start()
 
     def __on_connect(self, client, userdata, flags, rc):
         errors = {
