@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import argparse, time, sys, logging
+import argparse, math, time, sys, logging
 
 from enviroplus_homeassistant.models import SensorPayload
 
@@ -22,7 +22,8 @@ def parse_args():
     ap.add_argument("--print-sensors", action="store_true", help="Print sensors and do nothing else")
     ap.add_argument("--prefix", default="homeassistant", help="the topic prefix to use when publishing readings, i.e. 'homeassistant'")
     ap.add_argument("--client-id", default="", help="the MQTT client identifier to use when connecting")
-    ap.add_argument("--interval", type=int, default=65, help="the duration in seconds between updates")
+    ap.add_argument("--interval", type=int, default=300, help="the duration in seconds between publishes")
+    ap.add_argument("--sample-period", type=int, default=10, help="the duration in seconds between sensor samples")
     ap.add_argument("--delay", type=int, default=15, help="the duration in seconds to allow the sensors to stabilise before starting to publish readings")
     ap.add_argument("--use-pms5003", action="store_true", help="if set, PM readings will be taken from the PMS5003 sensor")
     ap.add_argument("--use-cpu-comp", action="store_true", help="Use the CPU temp compensation.")
@@ -35,6 +36,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    sample_period = max(1, args["sample_period"])
 
     logging.info("Starting with arguments: %s", args)
 
@@ -68,7 +70,7 @@ def main():
 
     acquire = EnviroPlus(
         use_pms5003=args["use_pms5003"],
-        num_samples=args["interval"],
+        num_samples=max(1, math.ceil(args["interval"] / sample_period)),
         use_cpu_comp=args["use_cpu_comp"],
         cpu_comp_factor=args["cpu_comp_factor"]
     )
@@ -78,7 +80,7 @@ def main():
     publish_start_time = time.time() + args["delay"]
     while time.time() < publish_start_time:
         acquire.update()
-        time.sleep(1)
+        time.sleep(min(sample_period, max(publish_start_time - time.time(), 0)))
 
     # Start taking readings and publishing them at the specified interval
     next_sample_time = time.time()
@@ -96,16 +98,24 @@ def main():
             acquire.update()
 
             if should_publish:
-                for sensor_name in acquire.samples[0].keys():
-                    value_sum = sum([d[sensor_name] for d in acquire.samples])
-                    value_avg = value_sum / len(acquire.samples)
+                sensor_totals = {}
+                sensor_counts = {}
+                for sample in acquire.samples:
+                    for sensor_name, sensor_value in sample.items():
+                        sensor_totals[sensor_name] = sensor_totals.get(sensor_name, 0) + sensor_value
+                        sensor_counts[sensor_name] = sensor_counts.get(sensor_name, 0) + 1
+
+                for sensor_name, value_sum in sensor_totals.items():
+                    if sensor_name not in discovery.sensors:
+                        continue
+                    value_avg = value_sum / sensor_counts[sensor_name]
                     value = SensorPayload(
                         value=value_avg
                     )
                     topic = discovery.sensors[sensor_name].state_topic
                     publisher.publish_json(topic, value, retain=args['retain_state'])
 
-            next_sample_time += 1
+            next_sample_time += sample_period
             sleep_duration = max(next_sample_time - time.time(), 0)
             time.sleep(sleep_duration)
     
