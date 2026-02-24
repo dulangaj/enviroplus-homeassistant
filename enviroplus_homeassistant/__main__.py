@@ -27,6 +27,7 @@ def parse_args():
     ap.add_argument("--delay", type=int, default=15, help="the duration in seconds to allow the sensors to stabilise before starting to publish readings")
     ap.add_argument("--use-pms5003", action="store_true", help="if set, PM readings will be taken from the PMS5003 sensor")
     ap.add_argument("--use-cpu-comp", action="store_true", help="Use the CPU temp compensation.")
+    ap.add_argument("--use-system-metrics", action="store_true", help="Publish host system metrics (CPU temp, memory usage, and 1m load average).")
     ap.add_argument("--no-retain-config", dest='retain_config', action="store_false", help="Do not set RETAIN flag on config messages.")
     ap.add_argument("--retain-state", action="store_true", help="Set RETAIN flag on state messages.")
     ap.add_argument("--cpu-comp-factor", type=float, default=2.25, help="The factor to use for the CPU temp compensation. Decrease this number to adjust the temperature down, and increase to adjust up.")
@@ -43,7 +44,8 @@ def main():
     discovery = HassDiscovery(
         use_pms5003=args["use_pms5003"],
         prefix=args["prefix"],
-        retain=args["retain_config"]
+        retain=args["retain_config"],
+        use_system_metrics=args["use_system_metrics"]
     )
 
     if args['print_sensors']:
@@ -72,7 +74,8 @@ def main():
         use_pms5003=args["use_pms5003"],
         num_samples=max(1, math.ceil(args["interval"] / sample_period)),
         use_cpu_comp=args["use_cpu_comp"],
-        cpu_comp_factor=args["cpu_comp_factor"]
+        cpu_comp_factor=args["cpu_comp_factor"],
+        use_system_metrics=args["use_system_metrics"]
     )
 
     # Take readings without publishing them for the specified delay period,
