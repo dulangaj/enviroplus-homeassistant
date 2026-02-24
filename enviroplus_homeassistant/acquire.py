@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import collections, threading, traceback
+import collections, threading, traceback, os, time
 
 try:
     # Transitional fix for breaking change in LTR559
@@ -44,8 +44,29 @@ class EnviroPlus:
         and over time a significant delay is introduced between changes in PM levels and 
         the corresponding change in reported levels."""
 
-        pms = PMS5003()
+        configured_device = os.getenv("PMS5003_DEVICE")
+        candidate_devices = (
+            [configured_device]
+            if configured_device
+            else ["/dev/serial0", "/dev/ttyAMA0", "/dev/ttyS0"]
+        )
+        pms = None
         while True:
+            if pms is None:
+                for device in candidate_devices:
+                    try:
+                        pms = PMS5003(device=device)
+                        print(f"PMS5003 connected on {device}")
+                        break
+                    except Exception:
+                        print(f"Failed to initialise PMS5003 on {device}")
+                        traceback.print_exc()
+
+                if pms is None:
+                    print("Unable to initialise PMS5003 on any candidate device. Retrying in 5 seconds.")
+                    time.sleep(5)
+                    continue
+
             try:
                 pm_data = pms.read()
                 self.latest_pms_readings = {
@@ -56,7 +77,12 @@ class EnviroPlus:
             except:
                 print("Failed to read from PMS5003. Resetting sensor.")
                 traceback.print_exc()
-                pms.reset()
+                try:
+                    pms.reset()
+                except Exception:
+                    print("Failed to reset PMS5003. Reinitialising.")
+                    traceback.print_exc()
+                    pms = None
 
 
     def take_readings(self):
