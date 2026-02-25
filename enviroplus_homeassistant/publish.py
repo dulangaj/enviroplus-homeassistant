@@ -8,8 +8,6 @@ import paho.mqtt.client as mqtt
 import json, dataclasses
 from .helpers import del_none
 
-logging.basicConfig(level=logging.DEBUG)
-
 class EnhancedJSONEncoder(json.JSONEncoder):
     def default(self, o):
         if dataclasses.is_dataclass(o):
@@ -26,7 +24,12 @@ class MqttPublisher:
         self.client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
         self.client.on_connect = self.__on_connect
         self.client.username_pw_set(username, password)
+        # Limit the paho MQTT client logger to WARNING so that routine
+        # protocol traffic (PINGREQ, PUBLISH ACK, etc.) is not written to
+        # the journal on every heartbeat interval, which would increase SD
+        # card write cycles unnecessarily.
         logger = logging.getLogger(__name__)
+        logger.setLevel(logging.WARNING)
         self.client.enable_logger(logger)
         # tls_set() must be called *before* connect().  It configures the SSL
         # context using the system's default CA certificates, which is correct

@@ -78,7 +78,8 @@ def main():
         use_pms5003=args["use_pms5003"],
         num_samples=max(1, math.ceil(args["interval"] / sample_period)),
         use_cpu_comp=args["use_cpu_comp"],
-        cpu_comp_factor=args["cpu_comp_factor"]
+        cpu_comp_factor=args["cpu_comp_factor"],
+        sample_period=sample_period,
     )
 
     # Take readings without publishing them for the specified delay period,

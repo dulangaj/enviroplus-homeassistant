@@ -23,8 +23,15 @@ _MEDIAN_SENSORS = {"pm1", "pm25", "pm10", "gas_oxidising", "gas_reducing", "gas_
 
 
 class EnviroPlus:
-    def __init__(self, use_pms5003, num_samples, use_cpu_comp: bool = True, cpu_num_samples: int = 5, cpu_comp_factor: float = 2.25):
+    def __init__(self, use_pms5003, num_samples, use_cpu_comp: bool = True, cpu_num_samples: int = 5, cpu_comp_factor: float = 2.25, sample_period: float = 0):
         self.bme280 = BME280()
+        # How long (seconds) the PMS5003 thread should idle between reads.
+        # Keeping this aligned with the main-loop sample period prevents the
+        # thread from reading the sensor far faster than data is consumed and
+        # spinning the CPU unnecessarily (which generates heat and shortens
+        # Raspberry Pi component life).  Two seconds of margin is kept for
+        # the sensor's ~1 s frame output interval.
+        self._pms_idle = max(0.0, sample_period - 2.0)
 
         self.samples = collections.deque(maxlen=num_samples)
         self.use_cpu_comp = use_cpu_comp
@@ -93,6 +100,11 @@ class EnviroPlus:
                 }
                 with self._pms_lock:
                     self._latest_pms_readings = new_readings
+                # Idle until the next sample is due.  Without this sleep the
+                # thread reads a new frame every ~1 s and discards most of
+                # them, burning CPU and producing heat for no benefit.
+                if self._pms_idle > 0:
+                    time.sleep(self._pms_idle)
             except PmsReadTimeoutError:
                 # ReadTimeoutError is a normal, expected condition: the PMS5003
                 # operates in a periodic duty cycle and will not respond while
