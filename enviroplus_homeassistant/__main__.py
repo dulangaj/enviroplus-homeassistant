@@ -30,6 +30,7 @@ def parse_args():
     ap.add_argument("--no-retain-config", dest='retain_config', action="store_false", help="Do not set RETAIN flag on config messages.")
     ap.add_argument("--retain-state", action="store_true", help="Set RETAIN flag on state messages.")
     ap.add_argument("--cpu-comp-factor", type=float, default=2.25, help="The factor to use for the CPU temp compensation. Decrease this number to adjust the temperature down, and increase to adjust up.")
+    ap.add_argument("--use-tls", action="store_true", help="Enable TLS for the MQTT connection.")
     ap.add_argument("--help", action="help", help="print this help message and exit")
     return vars(ap.parse_args())
 
@@ -40,10 +41,15 @@ def main():
 
     logging.info("Starting with arguments: %s", args)
 
+    # Set expire_after to 2× the publish interval so Home Assistant marks the
+    # sensor as unavailable if two consecutive publishes are missed.
+    expire_after = args["interval"] * 2
+
     discovery = HassDiscovery(
         use_pms5003=args["use_pms5003"],
         prefix=args["prefix"],
-        retain=args["retain_config"]
+        retain=args["retain_config"],
+        expire_after=expire_after,
     )
 
     if args['print_sensors']:
@@ -60,7 +66,7 @@ def main():
         port=args["port"],
         username=args["username"],
         password=args["password"],
-        use_tls=True,
+        use_tls=args["use_tls"],
         on_connect=discovery.publish if not args['delete_sensors'] else discovery.publish_delete
     )
 
@@ -98,20 +104,11 @@ def main():
             acquire.update()
 
             if should_publish:
-                sensor_totals = {}
-                sensor_counts = {}
-                for sample in acquire.samples:
-                    for sensor_name, sensor_value in sample.items():
-                        sensor_totals[sensor_name] = sensor_totals.get(sensor_name, 0) + sensor_value
-                        sensor_counts[sensor_name] = sensor_counts.get(sensor_name, 0) + 1
-
-                for sensor_name, value_sum in sensor_totals.items():
+                aggregated = EnviroPlus.aggregate_samples(acquire.samples)
+                for sensor_name, sensor_value in aggregated.items():
                     if sensor_name not in discovery.sensors:
                         continue
-                    value_avg = value_sum / sensor_counts[sensor_name]
-                    value = SensorPayload(
-                        value=value_avg
-                    )
+                    value = SensorPayload(value=sensor_value)
                     topic = discovery.sensors[sensor_name].state_topic
                     publisher.publish_json(topic, value, retain=args['retain_state'])
 
