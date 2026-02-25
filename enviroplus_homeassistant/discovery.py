@@ -9,12 +9,13 @@ from .models import DiscoveryDeviceConfig, DiscoverySensorConfig
 from .helpers import slugify
 
 class HassDiscovery:
-    def __init__(self, client_id:str = None, prefix:str="homeassistant", use_pms5003:bool = True, retain: bool=True):
+    def __init__(self, client_id:str = None, prefix:str="homeassistant", use_pms5003:bool = True, retain: bool=True, expire_after: int = None):
         self.mac = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         self.serialnum = self.getserial()
         self.use_pms5003 = use_pms5003
-        self.prefix=prefix
+        self.prefix = prefix
         self.retain = retain
+        self._expire_after = expire_after
         
         self.device = DiscoveryDeviceConfig(
             name="AirQuality",
@@ -30,6 +31,12 @@ class HassDiscovery:
         else:
             self.client_id = slugify(self.device.name)+"_"+self.serialnum.strip('0')
 
+        # Build keyword-args that are only applied when explicitly provided so
+        # that DiscoverySensorConfig's own defaults are used otherwise.
+        sensor_overrides = {}
+        if self._expire_after is not None:
+            sensor_overrides["expire_after"] = self._expire_after
+
         self.sensors = {
             "humidity": DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -37,7 +44,8 @@ class HassDiscovery:
                 name="Humidity",
                 unit_of_measurement="%",
                 device=self.device,
-                device_class="humidity"
+                device_class="humidity",
+                **sensor_overrides
             ),
             "temperature": DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -45,7 +53,8 @@ class HassDiscovery:
                 name="Temperature",
                 unit_of_measurement="°C",
                 device=self.device,
-                device_class="temperature"
+                device_class="temperature",
+                **sensor_overrides
             ),
             "pressure":  DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -53,7 +62,8 @@ class HassDiscovery:
                 name="Pressure",
                 unit_of_measurement="hPa",
                 device=self.device,
-                device_class="pressure"
+                device_class="pressure",
+                **sensor_overrides
             ),
             "illuminance":  DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -61,28 +71,32 @@ class HassDiscovery:
                 name="Illuminance",
                 unit_of_measurement="lx",
                 device=self.device,
-                device_class="illuminance"
+                device_class="illuminance",
+                **sensor_overrides
             ),
             "gas_oxidising":  DiscoverySensorConfig(
                 client_id=self.client_id,
                 prefix=self.prefix,
                 name="Gas Oxidising",
                 unit_of_measurement="kOhm",
-                device=self.device
+                device=self.device,
+                **sensor_overrides
             ),
             "gas_reducing":  DiscoverySensorConfig(
                 client_id=self.client_id,
                 prefix=self.prefix,
                 name="Gas Reducing",
                 unit_of_measurement="kOhm",
-                device=self.device
+                device=self.device,
+                **sensor_overrides
             ),
             "gas_nh3":  DiscoverySensorConfig(
                 client_id=self.client_id,
                 prefix=self.prefix,
                 name="Gas NH3",
                 unit_of_measurement="kOhm",
-                device=self.device
+                device=self.device,
+                **sensor_overrides
             ),
             "pm1":  DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -90,7 +104,8 @@ class HassDiscovery:
                 name="Particulate PM1",
                 unit_of_measurement="µg/m³",
                 device=self.device,
-                device_class="pm1"
+                device_class="pm1",
+                **sensor_overrides
             ),
             "pm25":  DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -98,7 +113,8 @@ class HassDiscovery:
                 name="Particulate PM2.5",
                 unit_of_measurement="µg/m³",
                 device=self.device,
-                device_class="pm25"
+                device_class="pm25",
+                **sensor_overrides
             ),
             "pm10":  DiscoverySensorConfig(
                 client_id=self.client_id,
@@ -106,7 +122,8 @@ class HassDiscovery:
                 name="Particulate PM10",
                 unit_of_measurement="µg/m³",
                 device=self.device,
-                device_class="pm10"
+                device_class="pm10",
+                **sensor_overrides
             )
         }
 
@@ -130,7 +147,7 @@ class HassDiscovery:
                 if line[0:6]=='Serial':
                     cpuserial = line[10:26]
             f.close()
-        except:
+        except Exception:
             cpuserial = "000000000ERROR"
 
         return cpuserial
