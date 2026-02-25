@@ -64,32 +64,46 @@ Four sensors are added: **Noise Level** (total amplitude), **Noise Low Frequency
 
 ## systemd service
 
-Get the Python path from your virtual environment:
-
-```bash
-poetry run bash -c 'which python3'
-```
-
-Create `/etc/systemd/system/enviroplus-homeassistant.service`:
+Create `/etc/systemd/system/enviroplus-ha.service`:
 
 ```ini
 [Unit]
-Description=Enviro+ MQTT Home Assistant
-After=network.target
+Description=Enviro+ -> MQTT Home Assistant Discovery
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=<python_path> -m enviroplus_homeassistant -h <mqtt-host> [options]
-WorkingDirectory=/home/pi/enviroplus-homeassistant
-StandardOutput=inherit
-StandardError=inherit
-Restart=always
+Type=simple
 User=pi
+ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --interval 300 --delay 60'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+If you have a **PMS5003** particulate sensor, add the `Environment` line and `--use-pms5003` flag:
+
+```ini
+[Unit]
+Description=Enviro+ -> MQTT Home Assistant Discovery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=PMS5003_DEVICE=/dev/serial0
+ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --use-pms5003 --interval 300 --delay 60'
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl enable enviroplus-homeassistant.service
-sudo systemctl start enviroplus-homeassistant.service
+sudo systemctl enable enviroplus-ha.service
+sudo systemctl start enviroplus-ha.service
 ```
