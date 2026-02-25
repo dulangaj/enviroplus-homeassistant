@@ -16,6 +16,11 @@ from pms5003 import PMS5003, ReadTimeoutError as PmsReadTimeoutError
 from enviroplus import gas
 from atmos import calculate
 
+try:
+    from enviroplus.noise import Noise as _Noise
+except ImportError:
+    _Noise = None
+
 # Sensors whose readings are characteristically noisy / spiky (e.g. optical
 # particle counters, electrochemical cells).  A median aggregation is more
 # robust for these than a mean.
@@ -23,7 +28,7 @@ _MEDIAN_SENSORS = {"pm1", "pm25", "pm10", "gas_oxidising", "gas_reducing", "gas_
 
 
 class EnviroPlus:
-    def __init__(self, use_pms5003, num_samples, use_cpu_comp: bool = True, cpu_num_samples: int = 5, cpu_comp_factor: float = 2.25, sample_period: float = 0):
+    def __init__(self, use_pms5003, num_samples, use_cpu_comp: bool = True, cpu_num_samples: int = 5, cpu_comp_factor: float = 2.25, sample_period: float = 0, use_noise: bool = False):
         self.bme280 = BME280()
         # How long (seconds) the PMS5003 thread should idle between reads.
         # Keeping this aligned with the main-loop sample period prevents the
@@ -50,6 +55,15 @@ class EnviroPlus:
 
         self._pms_lock = threading.Lock()
         self._latest_pms_readings = {}
+
+        if use_noise:
+            if _Noise is None:
+                print("Warning: enviroplus.noise is not available; noise readings disabled.")
+                self._noise = None
+            else:
+                self._noise = _Noise()
+        else:
+            self._noise = None
 
         if use_pms5003:
             self.pm_thread = threading.Thread(target=self.__read_pms_continuously)
@@ -147,6 +161,19 @@ class EnviroPlus:
 
         with self._pms_lock:
             readings.update(self._latest_pms_readings)
+
+        if self._noise is not None:
+            try:
+                # get_noise_profile() records ~0.5 s of audio and returns
+                # FFT amplitudes split into low/mid/high frequency bands plus
+                # the total amplitude across all bins above the noise floor.
+                low, mid, high, amp = self._noise.get_noise_profile()
+                readings["noise_low"] = low
+                readings["noise_mid"] = mid
+                readings["noise_high"] = high
+                readings["noise_amp"] = amp
+            except Exception:
+                pass  # noise capture is optional; errors are non-fatal
 
         return readings
 
