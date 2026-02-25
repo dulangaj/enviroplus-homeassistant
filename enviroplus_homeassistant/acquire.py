@@ -12,7 +12,7 @@ except ImportError:
     import ltr559
 
 from bme280 import BME280
-from pms5003 import PMS5003
+from pms5003 import PMS5003, ReadTimeoutError as PmsReadTimeoutError
 from enviroplus import gas
 from atmos import calculate
 
@@ -93,6 +93,13 @@ class EnviroPlus:
                 }
                 with self._pms_lock:
                     self._latest_pms_readings = new_readings
+            except PmsReadTimeoutError:
+                # ReadTimeoutError is a normal, expected condition: the PMS5003
+                # operates in a periodic duty cycle and will not respond while
+                # its fan/laser are spun down.  A brief pause before the next
+                # read attempt is all that is needed; resetting the sensor is
+                # unnecessary and can itself cause further timeouts.
+                time.sleep(1)
             except Exception:
                 print("Failed to read from PMS5003. Resetting sensor.")
                 traceback.print_exc()
@@ -102,6 +109,9 @@ class EnviroPlus:
                     print("Failed to reset PMS5003. Reinitialising.")
                     traceback.print_exc()
                     pms = None
+                # Brief pause before retrying so a persistent hardware fault
+                # does not spin the thread at 100 % CPU.
+                time.sleep(1)
 
     # ------------------------------------------------------------------
     # Sensor reading
