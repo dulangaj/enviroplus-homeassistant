@@ -1,46 +1,109 @@
 # enviroplus-homeassistant
-Pimoroni Enviro+ MQTT publisher with Home Assistant Discovery written in Python.
-Uses [pimoroni/enviroplus-python](https://github.com/pimoroni/enviroplus-python) and the excellent [paho-mqtt](https://www.eclipse.org/paho/index.php?page=clients/python/index.php) client.
 
-Clone this repository to for example your home directory with
+Publishes Pimoroni Enviro+ sensor readings to Home Assistant via MQTT Discovery.
 
-```
-git clone https://github.com/EraYaN/enviroplus-homeassistant.git
-``` 
+## Prerequisites
 
-**Note you might need the package `libatlas3-base` installed with `sudo apt install libatlas3-base` for this to all work at runtime.**
-## Installing with pip
-```
-pip3 install -r requiremnets.txt
+```bash
+sudo apt install libatlas3-base
 ```
 
-## Installing with poetry
-The `CFLAGS="-fcommon"` is required because of the newer bundled gcc (10) for building `rpi.gpio` which [piwheels](https://piwheels.org) does not build for python 3.9 that ships with bullseye.
-```
+## Install
+
+```bash
 CFLAGS="-fcommon" poetry install
 ```
 
-## SystemD unit
-Run `poetry run bash -c 'which python3'` to get the python path in the virtual env. If you are using the system python it is most likely `/usr/bin/python3`
-Add a new file `/etc/systemd/system/enviroplus-homeassistant.service` with the following content and replace the `<`*tags*`>`.
+> `CFLAGS="-fcommon"` is required to build `rpi.gpio` under GCC 10 (Bullseye).
+
+## Run
+
+```bash
+poetry run python -m enviroplus_homeassistant -h <mqtt-host> [options]
 ```
+
+## Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `-h`, `--host` | *(required)* | MQTT broker hostname or IP |
+| `-p`, `--port` | `1883` | MQTT broker port |
+| `-U`, `--username` | | MQTT username |
+| `-P`, `--password` | | MQTT password |
+| `--use-tls` | | Enable TLS for the MQTT connection |
+| `--prefix` | `homeassistant` | MQTT topic prefix |
+| `--client-id` | | MQTT client identifier |
+| `--interval` | `300` | Seconds between publishes |
+| `--sample-period` | `10` | Seconds between sensor samples |
+| `--delay` | `15` | Warm-up seconds before the first publish |
+| `--use-pms5003` | | Enable PMS5003 particulate sensor (PM1/2.5/10) |
+| `--use-noise` | | Enable MEMS microphone (see [Noise sensor](#noise-sensor)) |
+| `--use-cpu-comp` | | Apply CPU temperature compensation to the temperature reading |
+| `--cpu-comp-factor` | `2.25` | CPU compensation factor — decrease to read lower, increase to read higher |
+| `--no-retain-config` | | Do not set RETAIN on discovery config messages |
+| `--retain-state` | | Set RETAIN on state messages |
+| `--delete-sensors` | | Publish empty discovery payloads to remove sensors from Home Assistant, then exit |
+| `--print-sensors` | | Print all sensor keys and discovery topics, then exit |
+
+## Noise sensor
+
+The Enviro+ carries an ADAU7002 I2S MEMS microphone. Enable it with `--use-noise` after completing this one-time Pi setup:
+
+```bash
+# 1. Enable the I2S overlay
+echo 'dtoverlay=adau7002' | sudo tee -a /boot/config.txt
+
+# 2. Reboot
+sudo reboot
+
+# 3. Verify the device is visible
+arecord -l   # should list an adau7002 capture device
+```
+
+Four sensors are added: **Noise Level** (total amplitude), **Noise Low Frequency** (~0–960 Hz), **Noise Mid Frequency** (~960–2880 Hz), **Noise High Frequency** (~2880–8000 Hz). Values are relative FFT amplitudes, not calibrated dB SPL.
+
+## systemd service
+
+Create `/etc/systemd/system/enviroplus-ha.service`:
+
+```ini
 [Unit]
-Description=Enviro+ MQTT Home Assistant
-After=network.target
+Description=Enviro+ -> MQTT Home Assistant Discovery
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=<python_path> -m enviroplus_homeassistant <arguments>
-WorkingDirectory=/home/pi/enviroplus-homeassistant
-StandardOutput=inherit
-StandardError=inherit
-Restart=always
+Type=simple
 User=pi
+ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --interval 300 --delay 60'
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
-and then 
+
+If you have a **PMS5003** particulate sensor, add the `Environment` line and `--use-pms5003` flag:
+
+```ini
+[Unit]
+Description=Enviro+ -> MQTT Home Assistant Discovery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=PMS5003_DEVICE=/dev/serial0
+ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --use-pms5003 --interval 300 --delay 60'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
-sudo systemctl enable enviroplus-homeassistant.service
-sudo systemctl start enviroplus-homeassistant.service
+
+```bash
+sudo systemctl enable enviroplus-ha.service
+sudo systemctl start enviroplus-ha.service
 ```
