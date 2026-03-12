@@ -9,13 +9,14 @@ from .models import DiscoveryDeviceConfig, DiscoverySensorConfig
 from .helpers import slugify
 
 class HassDiscovery:
-    def __init__(self, client_id:str = None, prefix:str="homeassistant", use_pms5003:bool = True, retain: bool=True, expire_after: int = None):
+    def __init__(self, client_id:str = None, prefix:str="homeassistant", use_pms5003:bool = True, retain: bool=True, expire_after: int = None, gas_baselines: dict[str, float] = None):
         self.mac = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         self.serialnum = self.getserial()
         self.use_pms5003 = use_pms5003
         self.prefix = prefix
         self.retain = retain
         self._expire_after = expire_after
+        self._gas_baselines = gas_baselines or {}
         
         self.device = DiscoveryDeviceConfig(
             name="AirQuality",
@@ -127,6 +128,36 @@ class HassDiscovery:
             )
         }
 
+        if "gas_oxidising" in self._gas_baselines:
+            self.sensors["gas_no2_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="NO2 / Oxidising Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
+
+        if "gas_reducing" in self._gas_baselines:
+            self.sensors["gas_co_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="CO / Reducing Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
+
+        if "gas_nh3" in self._gas_baselines:
+            self.sensors["gas_nh3_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="NH3 Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
+
     def publish(self, publisher, userdata, flags):
         for sensor_name, sensor in self.sensors.items():
             self.publish_config(publisher,sensor)
@@ -151,4 +182,3 @@ class HassDiscovery:
             cpuserial = "000000000ERROR"
 
         return cpuserial
-

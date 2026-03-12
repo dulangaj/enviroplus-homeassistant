@@ -11,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 from .publish import MqttPublisher
 from .discovery import HassDiscovery
 from .acquire import EnviroPlus
+from .gas import apply_gas_indices, build_gas_baselines
 
 def parse_args():
     ap = argparse.ArgumentParser(add_help=False)
@@ -31,6 +32,9 @@ def parse_args():
     ap.add_argument("--retain-state", action="store_true", help="Set RETAIN flag on state messages.")
     ap.add_argument("--cpu-comp-factor", type=float, default=2.25, help="The factor to use for the CPU temp compensation. Decrease this number to adjust the temperature down, and increase to adjust up.")
     ap.add_argument("--use-tls", action="store_true", help="Enable TLS for the MQTT connection.")
+    ap.add_argument("--gas-oxidising-baseline", type=float, default=None, help="Optional clean-air baseline for the oxidising channel in kOhm. Enables a NO2/oxidising relative index.")
+    ap.add_argument("--gas-reducing-baseline", type=float, default=None, help="Optional clean-air baseline for the reducing channel in kOhm. Enables a CO/reducing relative index.")
+    ap.add_argument("--gas-nh3-baseline", type=float, default=None, help="Optional clean-air baseline for the NH3 channel in kOhm. Enables an NH3 relative index.")
     ap.add_argument("--help", action="help", help="print this help message and exit")
     return vars(ap.parse_args())
 
@@ -38,6 +42,14 @@ def parse_args():
 def main():
     args = parse_args()
     sample_period = max(1, args["sample_period"])
+    try:
+        gas_baselines = build_gas_baselines(
+            oxidising=args["gas_oxidising_baseline"],
+            reducing=args["gas_reducing_baseline"],
+            nh3=args["gas_nh3_baseline"],
+        )
+    except ValueError as exc:
+        sys.exit(str(exc))
 
     logging.info("Starting with arguments: %s", args)
 
@@ -50,6 +62,7 @@ def main():
         prefix=args["prefix"],
         retain=args["retain_config"],
         expire_after=expire_after,
+        gas_baselines=gas_baselines,
     )
 
     if args['print_sensors']:
@@ -105,6 +118,7 @@ def main():
 
             if should_publish:
                 aggregated = EnviroPlus.aggregate_samples(acquire.samples)
+                aggregated = apply_gas_indices(aggregated, gas_baselines)
                 for sensor_name, sensor_value in aggregated.items():
                     if sensor_name not in discovery.sensors:
                         continue
