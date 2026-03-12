@@ -18,7 +18,7 @@ from atmos import calculate
 
 try:
     from enviroplus.noise import Noise as _Noise
-except ImportError:
+except (ImportError, OSError):
     _Noise = None
 
 # Sensors whose readings are characteristically noisy / spiky (e.g. optical
