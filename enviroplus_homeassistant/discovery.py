@@ -9,7 +9,16 @@ from .models import DiscoveryDeviceConfig, DiscoverySensorConfig
 from .helpers import slugify
 
 class HassDiscovery:
-    def __init__(self, client_id:str = None, prefix:str="homeassistant", use_pms5003:bool = True, retain: bool=True, expire_after: int = None, gas_baselines: dict[str, float] = None):
+    def __init__(
+        self,
+        client_id: str = None,
+        prefix: str = "homeassistant",
+        use_pms5003: bool = True,
+        retain: bool = True,
+        use_noise: bool = False,
+        expire_after: int = None,
+        gas_baselines: dict[str, float] = None,
+    ):
         self.mac = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         self.serialnum = self.getserial()
         self.use_pms5003 = use_pms5003
@@ -157,6 +166,45 @@ class HassDiscovery:
                 device=self.device,
                 **sensor_overrides
             )
+
+        if use_noise:
+            # The Enviro+ carries a MEMS microphone (ADAU7002 I2S interface).
+            # Noise readings are relative FFT amplitudes, not calibrated dB SPL
+            # values, so no unit_of_measurement is set.  The frequency bands are
+            # determined by the noise_floor, low, and mid parameters of
+            # enviroplus.noise.Noise.get_noise_profile() (defaults: 100 Hz
+            # floor; low = 0–12 % of bins ≈ 0–960 Hz; mid = 12–36 % ≈
+            # 960–2880 Hz; high = 36–100 % ≈ 2880–8000 Hz).
+            self.sensors.update({
+                "noise_amp": DiscoverySensorConfig(
+                    client_id=self.client_id,
+                    prefix=self.prefix,
+                    name="Noise Level",
+                    device=self.device,
+                    **sensor_overrides
+                ),
+                "noise_low": DiscoverySensorConfig(
+                    client_id=self.client_id,
+                    prefix=self.prefix,
+                    name="Noise Low Frequency",
+                    device=self.device,
+                    **sensor_overrides
+                ),
+                "noise_mid": DiscoverySensorConfig(
+                    client_id=self.client_id,
+                    prefix=self.prefix,
+                    name="Noise Mid Frequency",
+                    device=self.device,
+                    **sensor_overrides
+                ),
+                "noise_high": DiscoverySensorConfig(
+                    client_id=self.client_id,
+                    prefix=self.prefix,
+                    name="Noise High Frequency",
+                    device=self.device,
+                    **sensor_overrides
+                ),
+            })
 
     def publish(self, publisher, userdata, flags):
         for sensor_name, sensor in self.sensors.items():
