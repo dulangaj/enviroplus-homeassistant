@@ -17,6 +17,7 @@ class HassDiscovery:
         retain: bool = True,
         use_noise: bool = False,
         expire_after: int = None,
+        gas_baselines: dict[str, float] = None,
     ):
         self.mac = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
         self.serialnum = self.getserial()
@@ -24,6 +25,7 @@ class HassDiscovery:
         self.prefix = prefix
         self.retain = retain
         self._expire_after = expire_after
+        self._gas_baselines = gas_baselines or {}
         
         self.device = DiscoveryDeviceConfig(
             name="AirQuality",
@@ -134,6 +136,36 @@ class HassDiscovery:
                 **sensor_overrides
             )
         }
+
+        if "gas_oxidising" in self._gas_baselines:
+            self.sensors["gas_no2_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="NO2 / Oxidising Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
+
+        if "gas_reducing" in self._gas_baselines:
+            self.sensors["gas_co_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="CO / Reducing Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
+
+        if "gas_nh3" in self._gas_baselines:
+            self.sensors["gas_nh3_index"] = DiscoverySensorConfig(
+                client_id=self.client_id,
+                prefix=self.prefix,
+                name="NH3 Relative Index",
+                value_template="{{ value_json.value | round(3) }}",
+                device=self.device,
+                **sensor_overrides
+            )
 
         if use_noise:
             # The Enviro+ carries a MEMS microphone (ADAU7002 I2S interface).
