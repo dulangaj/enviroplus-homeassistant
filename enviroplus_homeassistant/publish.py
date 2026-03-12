@@ -28,9 +28,13 @@ class MqttPublisher:
         self.client.username_pw_set(username, password)
         logger = logging.getLogger(__name__)
         self.client.enable_logger(logger)
+        # tls_set() must be called *before* connect().  It configures the SSL
+        # context using the system's default CA certificates, which is correct
+        # for brokers that present a publicly-trusted certificate.
         if use_tls:
-            self.client.connect(host, port)
-            self.client.loop_start()
+            self.client.tls_set()
+        self.client.connect(host, port)
+        self.client.loop_start()
 
     def __on_connect(self, client, userdata, flags, rc):
         errors = {
@@ -48,7 +52,10 @@ class MqttPublisher:
                 self.on_connect(self, userdata, flags)
 
     def publish(self, topic, value, retain=False):
-        self.client.publish(topic, str(value),retain=retain)
+        # QoS 1 (at-least-once delivery) ensures the broker acknowledges every
+        # message.  This prevents silent data loss on unreliable Wi-Fi links
+        # without the overhead of QoS 2's exactly-once handshake.
+        self.client.publish(topic, str(value), retain=retain, qos=1)
 
     def publish_json(self, topic, obj, retain=False):
         self.publish(topic, json.dumps(obj,cls=EnhancedJSONEncoder),retain=retain)
