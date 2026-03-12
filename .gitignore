@@ -191,3 +191,11 @@ cython_debug/
 !.vscode/*.code-snippets
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,visualstudiocode
+
+# Local systemd service file (use enviroplus-ha.service.example as a template)
+enviroplus-ha.service
+
+# Home Assistant database (downloaded for analysis)
+*.db
+home-assistant_v2.db-shm
+home-assistant_v2.db-wal

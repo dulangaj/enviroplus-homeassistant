@@ -1,0 +1,16 @@
+[Unit]
+Description=Enviro+ -> MQTT Home Assistant Discovery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<user>
+# Remove this line if you don't have a PMS5003 particulate sensor
+Environment=PMS5003_DEVICE=/dev/serial0
+ExecStart=/bin/bash -lc 'cd /home/<user>/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --use-pms5003 --gas-oxidising-baseline <kOhm> --gas-reducing-baseline <kOhm> --gas-nh3-baseline <kOhm> --interval 300 --delay 60 --use-cpu-comp --cpu-comp-factor 1.1'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
