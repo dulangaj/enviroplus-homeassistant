@@ -75,6 +75,19 @@ mosquitto_pub -h <mqtt-host> -t 'homeassistant/switch/<id>/fast_sampling/set' -m
 
 The daemon reports the switch position on `.../fast_sampling/state`, so `mosquitto_sub -h <mqtt-host> -t 'homeassistant/switch/#' -v` shows whether a command was acted on. Do not publish commands with `-r`: a retained command replays on every reconnect and will fight the UI.
 
+## systemd service
+
+Copy `enviroplus-ha.service.example` to `enviroplus-ha.service`, fill in your values, then symlink it into systemd:
+
+```bash
+cp enviroplus-ha.service.example enviroplus-ha.service
+# edit enviroplus-ha.service with your user, mqtt host, and any options
+sudo ln -s $(pwd)/enviroplus-ha.service /etc/systemd/system/enviroplus-ha.service
+sudo systemctl daemon-reload
+sudo systemctl enable enviroplus-ha.service
+sudo systemctl start enviroplus-ha.service
+```
+
 ## Gas channels
 
 The Enviro+ gas sensor reports three metal-oxide resistance channels, not directly calibrated gas concentrations:
@@ -93,13 +106,62 @@ If you have captured a stable clean-air baseline for one or more gas channels, t
 
 These derived values are trend indicators only. They are not trustworthy `ppm` measurements without per-device calibration, gas-specific response curves, and temperature/humidity compensation.
 
+### Capturing a baseline
+
+Run the service without baselines for several weeks, then query your Home Assistant database for the median resistance in clean-air conditions. Use the upper percentile (p80–p90) for reducing and NH3 channels (high resistance = clean air), and the lower percentile (p10–p50) for the oxidising channel (low resistance = clean air).
+
+```sql
+SELECT
+  sm.statistic_id,
+  ROUND(AVG(s.mean), 2) AS mean_kohm,
+  ROUND(MIN(s.min), 2)  AS min_kohm,
+  ROUND(MAX(s.max), 2)  AS max_kohm
+FROM statistics s
+JOIN statistics_meta sm ON s.metadata_id = sm.id
+WHERE sm.statistic_id IN (
+    'sensor.airquality_gas_nh3',
+    'sensor.airquality_gas_oxidising',
+    'sensor.airquality_gas_reducing'
+  )
+  AND s.created_ts > unixepoch('now', '-30 days')
+GROUP BY sm.statistic_id;
+```
+
+## PMS5003 particulate sensor
+
+Enable with `--use-pms5003` and set the `PMS5003_DEVICE` environment variable to the serial port the sensor is connected to (default `/dev/serial0`). See `enviroplus-ha.service.example` for how to set this in the service file.
+
+### Serial UART stability on Pi 3
+
+The Pi 3 has two UARTs. By default the full UART (`ttyAMA0`) is assigned to the Bluetooth radio, and the GPIO serial pins are given the mini UART (`ttyS0`). The mini UART is rate-limited and less reliable, which causes PMS5003 read timeouts.
+
+The fix is to disable Bluetooth so the full UART is freed up for the GPIO pins:
+
+```bash
+# Disable the Bluetooth UART overlay so ttyAMA0 is available on the GPIO pins
+echo 'dtoverlay=disable-bt' | sudo tee -a /boot/firmware/config.txt
+
+# Disable the Bluetooth modem service that initialises the BT hardware at boot
+sudo systemctl disable hciuart
+
+sudo reboot
+```
+
+After reboot, verify `/dev/serial0` now points to the full UART:
+
+```bash
+ls -la /dev/serial0   # should read -> ttyAMA0
+```
+
+> Note: this permanently disables Bluetooth on the Pi. For a dedicated sensor node that is the cleanest solution. If you need Bluetooth, see the Raspberry Pi documentation for alternative UART configurations.
+
 ## Noise sensor
 
 The Enviro+ carries an ADAU7002 I2S MEMS microphone. Enable it with `--use-noise` after completing this one-time Pi setup:
 
 ```bash
 # 1. Enable the I2S overlay
-echo 'dtoverlay=adau7002' | sudo tee -a /boot/config.txt
+echo 'dtoverlay=adau7002' | sudo tee -a /boot/firmware/config.txt
 
 # 2. Reboot
 sudo reboot
@@ -136,48 +198,27 @@ PYTHONPATH=tests/fakes:. python -m enviroplus_homeassistant --print-sensors -h l
 
 Readings are scripted through a JSON profile — see `tests/fakes/README.md`.
 
-## systemd service
-
-Create `/etc/systemd/system/enviroplus-ha.service`:
-
-```ini
-[Unit]
-Description=Enviro+ -> MQTT Home Assistant Discovery
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --interval 300 --delay 60'
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-If you have a PMS5003 particulate sensor, add the `Environment` line and `--use-pms5003` flag:
-
-```ini
-[Unit]
-Description=Enviro+ -> MQTT Home Assistant Discovery
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-Environment=PMS5003_DEVICE=/dev/serial0
-ExecStart=/bin/bash -lc 'cd /home/pi/enviroplus-homeassistant && source .venv/bin/activate && python -m enviroplus_homeassistant -h <mqtt-host> -p 1883 --client-id enviroplus --use-pms5003 --interval 300 --delay 60'
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+## Debugging
 
 ```bash
-sudo systemctl enable enviroplus-ha.service
-sudo systemctl start enviroplus-ha.service
+# Check whether the service is running and see its last few log lines
+sudo systemctl status enviroplus-ha.service
+
+# Stream live logs (Ctrl+C to stop)
+sudo journalctl -u enviroplus-ha.service -f
+
+# Show all logs since the last boot
+sudo journalctl -u enviroplus-ha.service -b
+
+# Show the last 100 lines
+sudo journalctl -u enviroplus-ha.service -n 100
+
+# Restart after changing the service file or code
+sudo systemctl daemon-reload && sudo systemctl restart enviroplus-ha.service
+
+# Verify the MQTT broker is reachable and receiving messages
+mosquitto_sub -h <mqtt-host> -p 1883 -t "homeassistant/#" -v
+
+# Check which Python and venv are being used
+sudo systemctl cat enviroplus-ha.service
 ```
