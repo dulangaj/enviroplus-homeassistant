@@ -2,7 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import argparse, math, time, sys, logging
+import argparse, math, time, sys, logging, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from enviroplus_homeassistant.models import SensorPayload
 
@@ -36,8 +37,38 @@ def parse_args():
     ap.add_argument("--gas-oxidising-baseline", type=float, default=None, help="Optional clean-air baseline for the oxidising channel in kOhm. Enables a NO2/oxidising relative index.")
     ap.add_argument("--gas-reducing-baseline", type=float, default=None, help="Optional clean-air baseline for the reducing channel in kOhm. Enables a CO/reducing relative index.")
     ap.add_argument("--gas-nh3-baseline", type=float, default=None, help="Optional clean-air baseline for the NH3 channel in kOhm. Enables an NH3 relative index.")
+    ap.add_argument("--api-port", type=int, default=None, help="if set, start an HTTP server on this port that accepts POST /reading to trigger an immediate publish")
     ap.add_argument("--help", action="help", help="print this help message and exit")
     return vars(ap.parse_args())
+
+
+def _make_api_server(port: int, force_publish_event: threading.Event):
+    """Start a lightweight HTTP server that triggers an immediate sensor publish
+    when it receives POST /reading.  Runs in a daemon thread so it exits with
+    the main process."""
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            if self.path == "/reading":
+                force_publish_event.set()
+                body = b'{"status": "ok"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A002
+            logging.info("API %s", format % args)
+
+    server = HTTPServer(("", port), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logging.info("API server listening on port %d — POST /reading to trigger an immediate publish", port)
+    return server
 
 
 def main():
@@ -89,6 +120,11 @@ def main():
         time.sleep(args["delay"])
         exit()
 
+    force_publish_event = threading.Event()
+
+    if args["api_port"] is not None:
+        _make_api_server(args["api_port"], force_publish_event)
+
     acquire = EnviroPlus(
         use_pms5003=args["use_pms5003"],
         use_noise=args["use_noise"],
@@ -112,11 +148,17 @@ def main():
         while True:
             if publisher.connection_error is not None:
                 sys.exit(f"Connecting to the MQTT server failed: {publisher.connection_error}")
-            
-            should_publish = time.time() >= next_publish_time
-            if should_publish:
+
+            timer_fired = time.time() >= next_publish_time
+            forced = force_publish_event.is_set()
+            should_publish = timer_fired or forced
+
+            if timer_fired:
                 next_publish_time += args["interval"]
-            
+            if forced:
+                force_publish_event.clear()
+                logging.info("Forced publish triggered via API")
+
             acquire.update()
 
             if should_publish:
