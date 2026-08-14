@@ -5,7 +5,7 @@
 import re, uuid,platform
 
 from .publish import MqttPublisher
-from .models import DiscoveryDeviceConfig, DiscoverySensorConfig
+from .models import DiscoveryDeviceConfig, DiscoverySensorConfig, DiscoveryButtonConfig, DiscoverySwitchConfig
 from .helpers import slugify
 
 class HassDiscovery:
@@ -206,16 +206,37 @@ class HassDiscovery:
                 ),
             })
 
+        self.button = DiscoveryButtonConfig(
+            client_id=self.client_id,
+            prefix=self.prefix,
+            name="Publish Now",
+            device=self.device,
+        )
+        self.command_topic = self.button.command_topic
+
+        self.fast_sampling_switch = DiscoverySwitchConfig(
+            client_id=self.client_id,
+            prefix=self.prefix,
+            name="Fast Sampling",
+            device=self.device,
+        )
+        self.fast_command_topic = self.fast_sampling_switch.command_topic
+        self.fast_state_topic = self.fast_sampling_switch.state_topic
+
     def publish(self, publisher, userdata, flags):
         for sensor_name, sensor in self.sensors.items():
             self.publish_config(publisher,sensor)
-        
-    def publish_config(self, publisher, sensor:DiscoverySensorConfig):
+        self.publish_config(publisher,self.button)
+        self.publish_config(publisher,self.fast_sampling_switch)
+
+    def publish_config(self, publisher, sensor):
         publisher.publish_json(sensor.get_config_topic(self.client_id,self.prefix), sensor, retain=self.retain)
 
     def publish_delete(self, publisher, userdata, flags):
         for sensor_name, sensor in self.sensors.items():
             publisher.publish(sensor.get_config_topic(self.client_id,self.prefix),'', retain=self.retain)
+        publisher.publish(self.button.get_config_topic(self.client_id,self.prefix),'', retain=self.retain)
+        publisher.publish(self.fast_sampling_switch.get_config_topic(self.client_id,self.prefix),'', retain=self.retain)
 
     def getserial(self):
         # Extract serial from cpuinfo file

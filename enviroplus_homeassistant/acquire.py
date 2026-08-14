@@ -26,6 +26,13 @@ except (ImportError, OSError):
 # robust for these than a mean.
 _MEDIAN_SENSORS = {"pm1", "pm25", "pm10", "gas_oxidising", "gas_reducing", "gas_nh3"}
 
+# Path to the CPU thermal zone reporting the SoC temperature, in millidegrees C.
+# Lifted to a module constant so tests can repoint it without stubbing the method.
+# The env var override lets an out-of-process test (e.g. a subprocess-based E2E
+# test) exercise --use-cpu-comp without a real Pi sysfs path; unset, behaviour
+# on the Pi is unchanged.
+CPU_TEMPERATURE_PATH = os.getenv("CPU_TEMPERATURE_PATH", "/sys/class/thermal/thermal_zone0/temp")
+
 
 class EnviroPlus:
     def __init__(
@@ -188,8 +195,22 @@ class EnviroPlus:
     def update(self):
         self.samples.append(self.take_readings())
 
+    def resize_window(self, num_samples):
+        """Resize the rolling sample window, keeping the most recent samples.
+
+        Shortening the window matters when the publish interval drops: without
+        it, publishes would come more often but each would still aggregate the
+        same long trailing history, so consecutive readings would overlap.
+
+        deque.maxlen is read-only, so the deque is rebuilt.  Its constructor
+        discards from the left when the iterable is longer than maxlen, which
+        is exactly the "keep the newest" behaviour wanted here.
+        """
+        if num_samples != self.samples.maxlen:
+            self.samples = collections.deque(self.samples, maxlen=num_samples)
+
     def get_cpu_temperature(self):
-        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+        with open(CPU_TEMPERATURE_PATH, "r") as f:
             temp = f.read()
             temp = int(temp) / 1000.0
         return temp

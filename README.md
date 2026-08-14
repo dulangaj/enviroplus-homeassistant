@@ -34,6 +34,8 @@ poetry run python -m enviroplus_homeassistant -h <mqtt-host> [options]
 | `--prefix` | `homeassistant` | MQTT topic prefix |
 | `--client-id` | | MQTT client identifier |
 | `--interval` | `300` | Seconds between publishes |
+| `--fast-interval` | `60` | Seconds between publishes while [Fast Sampling](#controls) is on |
+| `--fast-duration` | `1800` | Seconds before Fast Sampling reverts on its own; `0` to stay on until switched off |
 | `--sample-period` | `10` | Seconds between sensor samples |
 | `--delay` | `15` | Warm-up seconds before the first publish |
 | `--use-pms5003` | | Enable PMS5003 particulate sensor (PM1/2.5/10) |
@@ -47,6 +49,31 @@ poetry run python -m enviroplus_homeassistant -h <mqtt-host> [options]
 | `--retain-state` | | Set RETAIN on state messages |
 | `--delete-sensors` | | Publish empty discovery payloads to remove sensors from Home Assistant, then exit |
 | `--print-sensors` | | Print all sensor keys and discovery topics, then exit |
+
+## Controls
+
+Two entities are published alongside the sensors, so the device page in Home Assistant can drive the daemon:
+
+- **Publish Now** (button) — publishes immediately instead of waiting out the rest of the interval. The reading is the current aggregate, which always includes a sample taken at the moment you press it.
+- **Fast Sampling** (switch) — drops the publish interval to `--fast-interval` for a closer look at something changing, then reverts after `--fast-duration`. Turning it off reverts immediately.
+
+Fast Sampling shortens the aggregation window to match the interval, so the extra readings describe fresh air rather than re-averaging the same history. It does not survive a restart: the daemon publishes a retained `OFF` on startup, so a forgotten fast mode cannot quietly persist across a reboot.
+
+The command topics embed the discovery client id, which is derived from the Pi's CPU serial rather than from `--client-id`. Run `--print-sensors` to print the exact topics if you want to drive these from an automation instead of the UI:
+
+```bash
+python -m enviroplus_homeassistant --print-sensors -h <mqtt-host> | tail -2
+```
+
+Both entities are then drivable from the shell. The button fires on any payload; the switch takes `ON`/`OFF`, case-insensitively:
+
+```bash
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/button/<id>/publish_now/set'   -m PRESS
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/switch/<id>/fast_sampling/set' -m ON
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/switch/<id>/fast_sampling/set' -m OFF
+```
+
+The daemon reports the switch position on `.../fast_sampling/state`, so `mosquitto_sub -h <mqtt-host> -t 'homeassistant/switch/#' -v` shows whether a command was acted on. Do not publish commands with `-r`: a retained command replays on every reconnect and will fight the UI.
 
 ## Gas channels
 
@@ -82,6 +109,32 @@ arecord -l
 ```
 
 Four sensors are added: Noise Level, Noise Low Frequency, Noise Mid Frequency, and Noise High Frequency. Values are relative FFT amplitudes, not calibrated dB SPL.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests
+```
+
+Unit tests run anywhere. The end-to-end suite additionally starts a real
+mosquitto broker and runs the daemon as a real subprocess against fake sensors,
+so it needs:
+
+- **mosquitto** (`brew install mosquitto`, `apt install mosquitto`) — the E2E
+  tests skip themselves if it is missing
+- **Python < 3.11** — `atmos` calls `inspect.getargspec`, removed in 3.11, so it
+  cannot be imported on newer interpreters. Set `E2E_PYTHON` to point at a
+  suitable interpreter if the one running the tests is too new.
+
+`tests/fakes/` holds modules that shadow the hardware libraries. They are picked
+up by putting the directory first on `PYTHONPATH`, so the daemon runs unmodified
+with no patching:
+
+```bash
+PYTHONPATH=tests/fakes:. python -m enviroplus_homeassistant --print-sensors -h localhost
+```
+
+Readings are scripted through a JSON profile — see `tests/fakes/README.md`.
 
 ## systemd service
 
