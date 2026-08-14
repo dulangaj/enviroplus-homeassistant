@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 from dataclasses import dataclass, field, InitVar
-from typing import List, Union, Tuple
+from typing import ClassVar, List, Union, Tuple
 from .helpers import slugify
 
 @dataclass
@@ -21,33 +21,25 @@ class DiscoveryDeviceConfig:
     via_device:str=None
 
 @dataclass
-class DiscoverySensorConfig:
-    """Class for the discovery config of a sensor."""
+class DiscoveryEntityConfig:
+    """Base class for the discovery config of an MQTT entity."""
+
+    component: ClassVar[str] = "sensor"
 
     client_id:InitVar[str]
     prefix:InitVar[str]
 
     name:str
     device:DiscoveryDeviceConfig
-    device_class:str = None
-    unit_of_measurement:str = None
-    value_template:str="{{ value_json.value | round(1) }}"
-    expire_after: int = 15*60
-    force_update: bool = True
-    state_class: str = "measurement"
 
     object_id: str = field(init=False)
     unique_id:str = field(init=False)
-    state_topic: str = field(init=False)
-    
+
     def __post_init__(self, client_id:str,prefix:str=None):
         if self.device:
             self.object_id = f"{slugify(self.device.name)}_{slugify(self.name)}"
         else:
             self.object_id = slugify(self.name)
-        self.state_topic = self.get_base_topic(client_id,prefix) + "/state"
-        
-         
         self.unique_id = f"{client_id}_{slugify(self.name)}"
 
     def get_base_topic(self,client_id:str=None,prefix:str=None):
@@ -57,11 +49,55 @@ class DiscoverySensorConfig:
         if client_id:
             if not client_id.endswith("/"):
                 client_id += "/"
-        return f"{prefix or ''}sensor/{client_id or ''}{slugify(self.name)}"
+        return f"{prefix or ''}{self.component}/{client_id or ''}{slugify(self.name)}"
 
     def get_config_topic(self,client_id:str=None,prefix:str=None):
         return self.get_base_topic(client_id,prefix) + "/config"
-    
+
+@dataclass
+class DiscoverySensorConfig(DiscoveryEntityConfig):
+    """Class for the discovery config of a sensor."""
+
+    device_class:str = None
+    unit_of_measurement:str = None
+    value_template:str="{{ value_json.value | round(1) }}"
+    expire_after: int = 15*60
+    force_update: bool = True
+    state_class: str = "measurement"
+
+    state_topic: str = field(init=False)
+
+    def __post_init__(self, client_id:str,prefix:str=None):
+        super().__post_init__(client_id,prefix)
+        self.state_topic = self.get_base_topic(client_id,prefix) + "/state"
+
+@dataclass
+class DiscoveryButtonConfig(DiscoveryEntityConfig):
+    """Class for the discovery config of a button."""
+
+    component: ClassVar[str] = "button"
+
+    command_topic: str = field(init=False)
+
+    def __post_init__(self, client_id:str,prefix:str=None):
+        super().__post_init__(client_id,prefix)
+        self.command_topic = self.get_base_topic(client_id,prefix) + "/set"
+
+@dataclass
+class DiscoverySwitchConfig(DiscoveryEntityConfig):
+    """Class for the discovery config of a switch."""
+
+    component: ClassVar[str] = "switch"
+
+    optimistic: bool = False
+
+    command_topic: str = field(init=False)
+    state_topic: str = field(init=False)
+
+    def __post_init__(self, client_id:str,prefix:str=None):
+        super().__post_init__(client_id,prefix)
+        self.command_topic = self.get_base_topic(client_id,prefix) + "/set"
+        self.state_topic = self.get_base_topic(client_id,prefix) + "/state"
 
 @dataclass
 class SensorPayload:

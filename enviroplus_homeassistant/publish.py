@@ -23,6 +23,7 @@ class MqttPublisher:
         self.on_connect = on_connect
 
         self.connection_error = None
+        self._subscriptions = {}
         self.client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
         self.client.on_connect = self.__on_connect
         self.client.username_pw_set(username, password)
@@ -50,6 +51,31 @@ class MqttPublisher:
         else:
             if self.on_connect:
                 self.on_connect(self, userdata, flags)
+            # Subscriptions do not survive a reconnect, so every topic must be
+            # re-subscribed here whenever the client (re)connects.
+            for topic in self._subscriptions:
+                self.client.subscribe(topic, qos=1)
+
+    def __wrap_callback(self, callback):
+        def handler(client, userdata, message):
+            try:
+                payload = message.payload.decode("utf-8", errors="replace")
+                callback(payload)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Unhandled exception in MQTT subscription callback for topic %s",
+                    message.topic,
+                )
+        return handler
+
+    def subscribe(self, topic, callback):
+        self._subscriptions[topic] = callback
+        self.client.message_callback_add(topic, self.__wrap_callback(callback))
+        if self.client.is_connected():
+            # QoS 1, matching publish(): the broker acknowledges the
+            # subscription request, avoiding a silently dropped trigger on
+            # unreliable Wi-Fi links.
+            self.client.subscribe(topic, qos=1)
 
     def publish(self, topic, value, retain=False):
         # QoS 1 (at-least-once delivery) ensures the broker acknowledges every
