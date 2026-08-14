@@ -59,7 +59,21 @@ Two entities are published alongside the sensors, so the device page in Home Ass
 
 Fast Sampling shortens the aggregation window to match the interval, so the extra readings describe fresh air rather than re-averaging the same history. It does not survive a restart: the daemon publishes a retained `OFF` on startup, so a forgotten fast mode cannot quietly persist across a reboot.
 
-The command topics embed the discovery client id, which is derived from the Pi's CPU serial rather than from `--client-id`. Run `--print-sensors` to print the exact topics if you want to drive these from an automation instead of the UI.
+The command topics embed the discovery client id, which is derived from the Pi's CPU serial rather than from `--client-id`. Run `--print-sensors` to print the exact topics if you want to drive these from an automation instead of the UI:
+
+```bash
+python -m enviroplus_homeassistant --print-sensors -h <mqtt-host> | tail -2
+```
+
+Both entities are then drivable from the shell. The button fires on any payload; the switch takes `ON`/`OFF`, case-insensitively:
+
+```bash
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/button/<id>/publish_now/set'   -m PRESS
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/switch/<id>/fast_sampling/set' -m ON
+mosquitto_pub -h <mqtt-host> -t 'homeassistant/switch/<id>/fast_sampling/set' -m OFF
+```
+
+The daemon reports the switch position on `.../fast_sampling/state`, so `mosquitto_sub -h <mqtt-host> -t 'homeassistant/switch/#' -v` shows whether a command was acted on. Do not publish commands with `-r`: a retained command replays on every reconnect and will fight the UI.
 
 ## Gas channels
 
